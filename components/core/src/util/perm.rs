@@ -18,6 +18,7 @@ use std::path::Path;
 use error::{Error, Result};
 
 pub fn set_owner<T: AsRef<Path>, X: AsRef<str>>(path: T, owner: X) -> Result<()> {
+    debug!("Attempting to set owner of {:?} to {:?}", &path.as_ref(), &owner.as_ref());
     let output = try!(Command::new("chown")
         .arg(owner.as_ref())
         .arg(path.as_ref())
@@ -32,6 +33,7 @@ pub fn set_owner<T: AsRef<Path>, X: AsRef<str>>(path: T, owner: X) -> Result<()>
 // platform abstraction. Until then, if we move to Windows or some
 // other platform, this code will need to become platform specific.
 pub fn set_permissions<T: AsRef<Path>, X: AsRef<str>>(path: T, perm: X) -> Result<()> {
+    debug!("Attempting to set permissions on {:?} to {:?}", &path.as_ref(), &perm.as_ref());
     let output = try!(Command::new("chmod")
         .arg(perm.as_ref())
         .arg(path.as_ref())

@@ -10,6 +10,8 @@ pkg_build_deps=(core/make core/gcc)
 pkg_deps=(core/glibc)
 pkg_svc_run="bin/redis-server $pkg_svc_config_path/redis.config"
 pkg_expose=(6379)
+pkg_svc_user=dparfitt
+pkg_svc_group=sys
 
 do_build() {
 	make

@@ -152,8 +152,8 @@ impl Package {
     }
 
     /// Create the service path for this package.
-    pub fn create_svc_path(&self) -> Result<()> {
-        let runas = format!("{}:{}", SERVICE_PATH_OWNER, SERVICE_PATH_GROUP);
+    pub fn create_svc_path(&self, user: &str, group: &str) -> Result<()> {
+        let runas = format!("{}:{}", user, group);
         debug!("Creating svc paths");
         try!(std::fs::create_dir_all(self.pkg_install.svc_config_path()));
         try!(std::fs::create_dir_all(self.pkg_install.svc_data_path()));
