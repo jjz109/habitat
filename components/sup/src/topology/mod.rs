@@ -26,6 +26,7 @@ pub mod standalone;
 pub mod leader;
 pub mod initializer;
 
+
 use std::mem;
 use std::net::SocketAddrV4;
 use std::ops::DerefMut;
@@ -46,13 +47,14 @@ use error::{Result, SupError};
 use config::Config;
 use service_config::ServiceConfig;
 use sidecar;
-use supervisor::Supervisor;
+use supervisor::{RuntimeConfig, Supervisor};
 use gossip;
 use gossip::rumor::{Rumor, RumorList};
 use gossip::member::MemberList;
 use election::ElectionList;
 use time::SteadyTime;
 use util::signals;
+use util::users as hab_users;
 use config::UpdateStrategy;
 
 static LOGKEY: &'static str = "TP";
@@ -129,12 +131,16 @@ impl<'a> Worker<'a> {
     pub fn new(package: Package, topology: String, config: &'a Config) -> Result<Worker<'a>> {
         let mut pkg_updater = None;
         let package_name = package.name.clone();
+
+        let (svc_user, svc_group) = try!(hab_users::get_user_and_group(&package));
+        println!("Attemping to run as {}/{}", &svc_user, &svc_group);
+        let runtime_config = RuntimeConfig::new(svc_user, svc_group);
+
         let package_exposes = package.exposes().clone();
         let package_port = package_exposes.first().map(|e| e.clone());
         let package_ident = package.ident().clone();
         let pkg_lock = Arc::new(RwLock::new(package));
         let pkg_lock_1 = pkg_lock.clone();
-
 
         match config.update_strategy() {
             UpdateStrategy::None => {}
@@ -173,7 +179,7 @@ impl<'a> Worker<'a> {
         let service_config_lock = Arc::new(RwLock::new(service_config));
         let service_config_lock_1 = service_config_lock.clone();
 
-        let supervisor = Arc::new(RwLock::new(Supervisor::new(package_ident)));
+        let supervisor = Arc::new(RwLock::new(Supervisor::new(package_ident, runtime_config)));
 
         let sidecar_ml = gossip_server.member_list.clone();
         let sidecar_rl = gossip_server.rumor_list.clone();
@@ -226,77 +232,6 @@ impl<'a> Worker<'a> {
     }
 }
 
-extern crate users;
-use users::*;
-/// This function checks to see if a custom SVC_USER and SVC_GROUP has
-/// been specified as part of the package metadata. If not, return None
-fn check_pkg_user_and_group(pkg: &Package) -> Result<Option<(String, String)>> {
-    let svc_user = try!(pkg.pkg_install.svc_user());
-    let svc_group = try!(pkg.pkg_install.svc_group());
-    match (svc_user, svc_group) {
-        (Some(user), Some(group)) => {
-            // a package has a SVC_USER and SVC_GROUP defined,
-            // these MUST exist in order to continue
-            debug!("SVC_USER = {}", &user);
-            debug!("SVC_GROUP = {}", &group);
-            debug!("Checking to see if user and group exist");
-            if let None = users::get_user_by_name(&user) {
-                panic!("Package requires user {} to exist, but it doesn't", user);
-                // TODO: return an Error
-            }
-            if let None = users::get_group_by_name(&group) {
-                panic!("Package requires group {} to exist, but it doesn't", group);
-                // TODO: return an Error
-            }
-            Ok(Some((user, group)))
-        }
-        _ => {
-            debug!("User/group not specified in package, running with default");
-            Ok(None)
-        }
-    }
-}
-
-/// checks to see if hab/hab exists, if not, fall back to
-/// current user/group. If that fails, then return an error.
-fn get_default_user_and_group() -> Result<(String, String)> {
-    // TODO: constants
-    let user = users::get_user_by_name("hab");
-    let group = users::get_group_by_name("hab");
-    match (user, group) {
-        (Some(user), Some(group)) => return Ok((user.name().to_string(), group.name().to_string())),
-        _ => {
-            println!("hab/hab does NOT exist");
-            let user = users::get_current_username();
-            let group = users::get_current_groupname();
-            match (user, group) {
-                (Some(user), Some(group)) => {
-                    println!("Running as {}/{}", user, group);
-                    return Ok((user, group));
-                }
-                _ => {
-                    println!("Can't determine current user/group");
-                    // TODO: error handling
-                    return Ok(("nobody".to_string(), "nobody".to_string()));
-                }
-            }
-        }
-    }
-}
-
-/// check and see if a user/group is specified in package metadata.
-/// if not, we'll try and use hab/hab.
-/// If hab/hab doesn't exist, try to use (current username, current group).
-/// If that doesn't work, then give up.
-fn get_user_and_group(pkg: &Package) -> Result<(String, String)> {
-    if let Some((user, group)) = try!(check_pkg_user_and_group(&pkg)) {
-        Ok((user, group))
-    } else {
-        let defaults = try!(get_default_user_and_group());
-        Ok(defaults)
-    }
-}
-
 /// The main loop of a topology.
 ///
 /// 1. Loops forever
@@ -320,11 +255,9 @@ fn run_internal<'a>(sm: &mut StateMachine<State, Worker<'a>, SupError>,
     {
         let package = worker.package.read().unwrap();
         let service_config = worker.service_config.read().unwrap();
-
-        let (user, group) = try!(get_user_and_group(&package));
-        println!("Attemping to run as {}/{}", &user, &group);
-
-        try!(package.create_svc_path(&user, &group));
+        let supervisor = worker.supervisor.read().unwrap();
+        try!(package.create_svc_path(&supervisor.runtime_config.svc_user,
+                                     &supervisor.runtime_config.svc_group));
         try!(package.copy_run(&service_config));
     }
     let handler = wonder::actor::Builder::new(SignalNotifier)
