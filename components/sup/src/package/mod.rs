@@ -148,6 +148,9 @@ impl Package {
         self.pkg_install.svc_path()
     }
 
+
+    /// this function wraps create_dir_all so we can give friendly error
+    /// messages to the user.
     fn create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
         debug!("Creating dir with subdirs: {:?}", &path.as_ref());
         if let Err(e) = std::fs::create_dir_all(&path) {
@@ -161,6 +164,7 @@ impl Package {
     pub fn create_svc_path(&self, user: &str, group: &str) -> Result<()> {
         let runas = format!("{}:{}", user, group);
         debug!("Creating svc paths");
+
         if let Err(e) = Self::create_dir_all(self.pkg_install.svc_path()) {
             outputln!("Can't create directory {}", &self.pkg_install.svc_path().to_str().unwrap());
             outputln!("If this service is running as non-root, you'll need to create \
@@ -191,7 +195,7 @@ impl Package {
     pub fn copy_run(&self, context: &ServiceConfig) -> Result<()> {
         debug!("Copying the run file");
         let svc_run = self.pkg_install.svc_path().join(RUN_FILENAME);
-        println!("svc_run = {}", &svc_run.to_str().unwrap());
+        debug!("svc_run = {}", &svc_run.to_str().unwrap());
         if let Some(hook) = self.hooks().run_hook {
             debug!("Comiling hook");
             try!(hook.compile(Some(context)));
@@ -201,8 +205,8 @@ impl Package {
             let run = self.path().join(RUN_FILENAME);
             match std::fs::metadata(&run) {
                 Ok(_) => {
-                    println!("RUN = {}", &run.to_str().unwrap());
-                    println!("SVC_RUN = {}", &svc_run.to_str().unwrap());
+                    debug!("run file = {}", &run.to_str().unwrap());
+                    debug!("svc_run file = {}", &svc_run.to_str().unwrap());
                     try!(std::fs::copy(&run, &svc_run));
                     try!(util::perm::set_permissions(&svc_run, "0755"));
                 }

@@ -23,7 +23,6 @@ extern crate ansi_term;
 extern crate libc;
 #[macro_use]
 extern crate clap;
-extern crate users;
 
 use std::process;
 use std::result;

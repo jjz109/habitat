@@ -137,14 +137,6 @@ impl RuntimeConfig {
             svc_group: svc_group,
         }
     }
-
-    pub fn running_as_svc_user_and_group() -> bool {
-        true
-    }
-
-    pub fn svc_user_and_group_exist() -> bool {
-        true
-    }
 }
 
 #[derive(Debug)]
