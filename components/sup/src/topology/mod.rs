@@ -133,7 +133,7 @@ impl<'a> Worker<'a> {
         let package_name = package.name.clone();
 
         let (svc_user, svc_group) = try!(hab_users::get_user_and_group(&package));
-        println!("Attemping to run as {}/{}", &svc_user, &svc_group);
+        outputln!("Running child process as {}/{}", &svc_user, &svc_group);
         let runtime_config = RuntimeConfig::new(svc_user, svc_group);
 
         let package_exposes = package.exposes().clone();

@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO
+#[cfg(any(target_os="linux", target_os="macos"))]
 extern crate users;
-use users::*;
 
 use error::{Result, Error};
 use package::Package;
 
+static LOGKEY: &'static str = "USERS";
+
 /// This function checks to see if a custom SVC_USER and SVC_GROUP has
-/// been specified as part of the package metadata. If not, return None
+/// been specified as part of the package metadata.
+/// If a pkg_svc_user and pkg_svc_group have been defined, check if:
+///     a) we are root
+///     b) we are the specified user:group
+///     c) fail otherwise
+/// If pkg_svc_user and pkg_svc_group have NOT been defined, return None.
+#[cfg(any(target_os="linux", target_os="macos"))]
 fn check_pkg_user_and_group(pkg: &Package) -> Result<Option<(String, String)>> {
     let svc_user = try!(pkg.pkg_install.svc_user());
     let svc_group = try!(pkg.pkg_install.svc_group());
@@ -30,16 +37,47 @@ fn check_pkg_user_and_group(pkg: &Package) -> Result<Option<(String, String)>> {
             // these MUST exist in order to continue
             debug!("SVC_USER = {}", &user);
             debug!("SVC_GROUP = {}", &group);
-            debug!("Checking to see if user and group exist");
             if let None = users::get_user_by_name(&user) {
-                panic!("Package requires user {} to exist, but it doesn't", user);
-                // TODO: return an Error
+                return Err(sup_error!(Error::Permissions(format!("Package requires user {} to \
+                                                                  exist, but it doesn't",
+                                                                 user))));
             }
             if let None = users::get_group_by_name(&group) {
-                panic!("Package requires group {} to exist, but it doesn't", group);
-                // TODO: return an Error
+                return Err(sup_error!(Error::Permissions(format!("Package requires group {} \
+                                                                  to exist, but it doesn't",
+                                                                 group))));
             }
-            Ok(Some((user, group)))
+
+            let current_user = users::get_current_username();
+            let current_group = users::get_current_groupname();
+
+            if let None = current_user {
+                return Err(sup_error!(Error::Permissions("Can't determine current user"
+                    .to_string())));
+            }
+
+            if let None = current_group {
+                return Err(sup_error!(Error::Permissions("Can't determine current group"
+                    .to_string())));
+            }
+
+            let current_user = current_user.unwrap();
+            let current_group = current_group.unwrap();
+
+            if current_user == "root" {
+                Ok(Some((user, group)))
+            } else {
+                if current_user == user && current_group == group {
+                    // ok, sup is running as svc_user/svc_group already
+                    Ok(Some((user, group)))
+                } else {
+                    return Err(sup_error!(Error::Permissions(format!("Package must run as \
+                                                                      {}:{} or root",
+                                                                     &user,
+                                                                     &group))));
+
+                }
+            }
         }
         _ => {
             debug!("User/group not specified in package, running with default");
@@ -50,6 +88,7 @@ fn check_pkg_user_and_group(pkg: &Package) -> Result<Option<(String, String)>> {
 
 /// checks to see if hab/hab exists, if not, fall back to
 /// current user/group. If that fails, then return an error.
+#[cfg(any(target_os="linux", target_os="macos"))]
 fn get_default_user_and_group() -> Result<(String, String)> {
     // TODO: constants
     let user = users::get_user_by_name("hab");
@@ -90,7 +129,7 @@ pub fn get_user_and_group(pkg: &Package) -> Result<(String, String)> {
 }
 
 #[cfg(any(target_os="linux", target_os="macos"))]
-pub fn user_name_to_uid(user : &str) -> Option<u32> {
+pub fn user_name_to_uid(user: &str) -> Option<u32> {
     users::get_user_by_name(user).map(|u| u.uid())
 }
 
@@ -103,6 +142,3 @@ pub fn group_name_to_gid(group: &str) -> Option<u32> {
 pub fn get_user_and_group(pkg: &Package) -> Result<(String, String)> {
     unimplemented!();
 }
-
-
-

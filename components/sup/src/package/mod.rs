@@ -22,7 +22,6 @@ use std;
 use std::env;
 use std::fmt;
 use std::fs::File;
-use std::os::unix;
 use std::path::{Path, PathBuf};
 use std::string::ToString;
 use std::io::prelude::*;
@@ -43,8 +42,6 @@ const HEALTHCHECK_FILENAME: &'static str = "health_check";
 const FILEUPDATED_FILENAME: &'static str = "file_updated";
 const RECONFIGURE_FILENAME: &'static str = "reconfigure";
 const RUN_FILENAME: &'static str = "run";
-const SERVICE_PATH_OWNER: &'static str = "hab";
-const SERVICE_PATH_GROUP: &'static str = "hab";
 
 #[derive(Debug, Clone)]
 pub struct Package {
@@ -151,24 +148,41 @@ impl Package {
         self.pkg_install.svc_path()
     }
 
+    fn create_dir_all<P: AsRef<Path>>(path: P) -> Result<()> {
+        debug!("Creating dir with subdirs: {:?}", &path.as_ref());
+        if let Err(e) = std::fs::create_dir_all(&path) {
+            Err(sup_error!(Error::Permissions(format!("Can't create {:?}, {}", &path.as_ref(), e))))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Create the service path for this package.
     pub fn create_svc_path(&self, user: &str, group: &str) -> Result<()> {
         let runas = format!("{}:{}", user, group);
         debug!("Creating svc paths");
-        try!(std::fs::create_dir_all(self.pkg_install.svc_config_path()));
-        try!(std::fs::create_dir_all(self.pkg_install.svc_data_path()));
+        if let Err(e) = Self::create_dir_all(self.pkg_install.svc_path()) {
+            outputln!("Can't create directory {}", &self.pkg_install.svc_path().to_str().unwrap());
+            outputln!("If this service is running as non-root, you'll need to create \
+                       {} and give the current user write access to it",
+                      self.pkg_install.svc_path().to_str().unwrap());
+            return Err(e);
+        }
+
+        try!(Self::create_dir_all(self.pkg_install.svc_config_path()));
+        try!(Self::create_dir_all(self.pkg_install.svc_data_path()));
         try!(util::perm::set_owner(self.pkg_install.svc_data_path(), &runas));
         try!(util::perm::set_permissions(self.pkg_install.svc_data_path(), "0700"));
-        try!(std::fs::create_dir_all(self.pkg_install.svc_files_path()));
+        try!(Self::create_dir_all(self.pkg_install.svc_files_path()));
         try!(util::perm::set_owner(self.pkg_install.svc_files_path(), &runas));
         try!(util::perm::set_permissions(self.pkg_install.svc_files_path(), "0700"));
-        try!(std::fs::create_dir_all(self.pkg_install.svc_hooks_path()));
-        try!(std::fs::create_dir_all(self.pkg_install.svc_var_path()));
+        try!(Self::create_dir_all(self.pkg_install.svc_hooks_path()));
+        try!(Self::create_dir_all(self.pkg_install.svc_var_path()));
         try!(util::perm::set_owner(self.pkg_install.svc_var_path(), &runas));
         try!(util::perm::set_permissions(self.pkg_install.svc_var_path(), "0700"));
         // TODO: Not 100% if this directory is still needed, but for the moment it's still here -
         // FIN
-        try!(std::fs::create_dir_all(self.pkg_install.svc_path().join("toml")));
+        try!(Self::create_dir_all(self.pkg_install.svc_path().join("toml")));
         try!(util::perm::set_permissions(self.pkg_install.svc_path().join("toml"), "0700"));
         Ok(())
     }
@@ -177,28 +191,20 @@ impl Package {
     pub fn copy_run(&self, context: &ServiceConfig) -> Result<()> {
         debug!("Copying the run file");
         let svc_run = self.pkg_install.svc_path().join(RUN_FILENAME);
+        println!("svc_run = {}", &svc_run.to_str().unwrap());
         if let Some(hook) = self.hooks().run_hook {
+            debug!("Comiling hook");
             try!(hook.compile(Some(context)));
-            match std::fs::read_link(&svc_run) {
-                Ok(path) => {
-                    if path != hook.path {
-                        try!(util::perm::set_permissions(hook.path.to_str().unwrap(), "0755"));
-                        try!(std::fs::remove_file(&svc_run));
-                        try!(unix::fs::symlink(hook.path, &svc_run));
-                    }
-                }
-                Err(_) => try!(unix::fs::symlink(hook.path, &svc_run)),
-            }
+            try!(std::fs::copy(hook.path, &svc_run));
+            try!(util::perm::set_permissions(&svc_run.to_str().unwrap(), "0755"));
         } else {
             let run = self.path().join(RUN_FILENAME);
             match std::fs::metadata(&run) {
                 Ok(_) => {
-                    try!(util::perm::set_permissions(&run, "0755"));
-                    match std::fs::metadata(&svc_run) {
-                        Ok(_) => try!(std::fs::remove_file(&svc_run)),
-                        Err(_) => {}
-                    }
-                    try!(unix::fs::symlink(&run, &svc_run));
+                    println!("RUN = {}", &run.to_str().unwrap());
+                    println!("SVC_RUN = {}", &svc_run.to_str().unwrap());
+                    try!(std::fs::copy(&run, &svc_run));
+                    try!(util::perm::set_permissions(&svc_run, "0755"));
                 }
                 Err(e) => {
                     outputln!("Error finding the run file: {}", e);
